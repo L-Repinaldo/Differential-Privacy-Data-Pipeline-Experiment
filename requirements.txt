@@ -1,9 +1,0 @@
-PyYAML==6.0.2
-pandas==2.2.3
-numpy==2.2.1
-psycopg2==2.9.11
-python-dateutil==2.9.0.post0
-python-dotenv==1.2.1
-jsonschema==4.25.0
-jsonschema-specifications==2025.4.1
-diffprivlib
