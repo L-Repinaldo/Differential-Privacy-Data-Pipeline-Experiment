@@ -1,104 +1,116 @@
- # DP-Data-Pipeline
+# DP-Data-Pipeline
 
- Camada de preparação e aplicação de Privacidade Diferencial para o experimento
+Camada de preparação, aplicação de Privacidade Diferencial e versionamento para o experimento com microdados do ENEM 2025.
 
- ## Objetivo do Projeto
+## Objetivo do Projeto
 
- Este repositório implementa a etapa de Privacidade Diferencial do experimento. Sua responsabilidade é receber dados tabulares sintéticos gerados pelo Sistema de RH, executar limpeza e transformação, aplicar mecanismos de privacidade configuráveis e produzir versões versionadas dos datasets para consumo pelo pipeline experimental de Machine Learning e testes de Membership Inference Attack.
+Este repositório implementa a etapa de Privacidade Diferencial do experimento. Sua responsabilidade é receber os microdados tabulares do ENEM, selecionar e preparar as variáveis configuradas, aplicar mecanismos de privacidade configuráveis e produzir versões versionadas dos datasets para consumo pelo pipeline experimental de Machine Learning e testes de Membership Inference Attack.
 
- Em particular, o projeto resolve o problema de produzir datasets privatizados de forma reprodutível e rastreável, permitindo comparar impacto de diferentes valores de ε sobre a utilidade dos dados.
+Em particular, o projeto permite comparar o impacto de diferentes valores de ε sobre a utilidade dos dados, preservando o dataset base e os parâmetros empregados em cada execução.
 
- ## Arquitetura Geral
+## Arquitetura Geral
 
- Principais componentes (módulos):
+Principais componentes (módulos):
 
- - `src/extract.py` — conecta ao banco PostgreSQL e extrai as tabelas configuradas em `config/pipeline.yaml` como DataFrames Pandas.
- - `src/transform.py` — prepara os dados tabulares: cálculo de `idade` e `tempo_na_empresa`, agregação de avaliações (`nota_media`), contagem de benefícios (`qtd_beneficios`), merges com dimensões (`cargo`, `setor`), preenchimento de NA e tipagem.
- - `src/diferential_privacy.py` — camada de privatização. Implementa aplicação do mecanismo Laplace (via `diffprivlib`) aos atributos sensíveis definidos em configuração. Mantém compatibilidade de formato e registra metadados importantes (mecanismo, atributos, epsilons, seed).
- - `src/versioning.py` — persiste os arquivos gerados por execução em `datasets/v-YYYY-MM-DD_HH-MM-SS/`, incluindo `baseline.csv`, `dp_eps_{epsilon}.csv` e `metadata.json`.
- - `config/pipeline.yaml` — arquivo de configuração principal: fontes de dados, colunas esperadas, atributos sensíveis (bounds), mecanismo e lista de epsilons.
+- `run_pipeline.py` — orquestra a execução: carrega `config/enem.yaml`, faz o perfil dos dados, cria a versão e grava o baseline e as versões privadas.
+- `src/data_exraction.py` — lê o CSV de origem incrementalmente com Pandas. O tamanho dos chunks é configurável e, se omitido, é `100_000` linhas.
+- `src/transform_dataframe.py` — seleciona e valida as colunas de saída. A saída reúne as colunas nominais, ordinais, numéricas e a coluna-alvo; as demais, incluindo as listadas em `drop_columns`, não são carregadas para o resultado.
+- `src/encoding.py` — codifica temporariamente os atributos categóricos sensíveis para valores numéricos, valida os mapeamentos e decodifica os valores privatizados para a categoria mais próxima antes da gravação.
+- `src/diferential_privacy.py` — valida a configuração, calcula limites globais dos atributos sensíveis e aplica ruído Laplace com NumPy, limitado aos valores mínimo e máximo observados.
+- `src/versioning.py` — cria `datasets/{nome_do_dataset} - v-YYYY-MM-DD_HH-MM-SS/` e grava os CSVs incrementalmente, com um único cabeçalho por arquivo.
+- `config/enem.yaml` — arquivo de configuração principal: fonte ENEM, seleção de colunas, mapeamentos de codificação e parâmetros de privacidade.
 
- Cada módulo tem responsabilidade bem definida e o fluxo é implementado por `run_pipeline.py`.
+Cada módulo tem responsabilidade bem definida e o fluxo é implementado por `run_pipeline.py`.
 
- ## Papel na Arquitetura do Experimento
+## Papel na Arquitetura do Experimento
 
- - Sistema de RH Sintético: gera os dados originais (fora deste repositório).
- - DP Data Pipeline (este repositório): realiza extração, transformação, aplicação de Privacidade Diferencial e versionamento dos datasets.
- - Pipeline Experimental de Machine Learning: consome os CSVs gerados (baseline e versões privatizadas) para treinar modelos e executar avaliações, incluindo ataques de Membership Inference.
+- Microdados ENEM 2025: fonte tabular de participantes, configurada como `config/Data/PARTICIPANTES_2025.csv`.
+- DP Data Pipeline (este repositório): lê os dados em chunks, prepara as variáveis, aplica Privacidade Diferencial e versiona os resultados.
+- Pipeline Experimental de Machine Learning: consome o baseline e as versões privatizadas para treinar modelos e executar avaliações, incluindo ataques de Membership Inference.
 
- Este repositório corresponde estritamente à etapa de privatização e não realiza treino ou avaliação de modelos.
+Este repositório corresponde estritamente à etapa de preparação e privatização; não realiza treino ou avaliação de modelos.
 
- ## Fluxo Completo dos Dados
+## Fluxo Completo dos Dados
 
- ```text
- PostgreSQL
-    ↓
- src/extract.py (extração de tabelas como DataFrames)
-    ↓
- src/transform.py (limpeza, agregações e tipagem)
-    ↓
- src/diferential_privacy.py (aplica mecanismo Laplace por atributo sensível)
-    ↓
- src/versioning.py (salva baseline, dp_eps_*.csv e metadata.json)
-    ↓
- datasets/ (versões geradas)
- ```
+```text
+config/Data/PARTICIPANTES_2025.csv
+   ↓
+src/data_exraction.py (leitura incremental em chunks)
+   ↓
+src/transform_dataframe.py (seleção e validação das colunas)
+   ↓
+1ª passagem: src/encoding.py + src/diferential_privacy.py
+            (codificação e cálculo dos limites globais)
+   ↓
+2ª passagem: baseline.csv + codificação → ruído Laplace → decodificação
+   ↓
+src/versioning.py (gravação incremental e metadata.json)
+   ↓
+datasets/enem_2025 - v-YYYY-MM-DD_HH-MM-SS/
+```
 
- ## Formato de Entrada e Saída
+O uso de duas passagens evita materializar o arquivo inteiro em memória e garante que os limites usados pelo mecanismo sejam globais, e não apenas do chunk em processamento.
 
- - Entrada: tabelas SQL conforme `config/pipeline.yaml` (`funcionarios`, `avaliacoes`, `beneficios`, `beneficio_funcionario`, `setores`, `cargos`). O módulo `extract` retorna um dicionário de DataFrames.
- - Saída: em cada execução é criado um diretório `datasets/v-YYYY-MM-DD_HH-MM-SS/` com:
-   - `baseline.csv` — dataset pós-transformação sem ruído;
-   - `dp_eps_{epsilon}.csv` — uma versão por cada ε configurado (ex.: `0.1`, `0.5`, `1.0`, `2.0`);
-   - `metadata.json` — descreve `mechanism`, `attributes` (min/max/sensitivity), `epsilons` e `seed` usado para reprodutibilidade.
+## Formato de Entrada e Saída
 
- As colunas do dataset de saída (exemplo): `salario, idade, tempo_na_empresa, nota_media, qtd_beneficios, cargo, setor`.
+- Entrada: CSV configurado em `source.file`, atualmente `config/Data/PARTICIPANTES_2025.csv`, separado por `;` e lido com codificação `latin-1`.
+- Transformação: o arquivo `config/enem.yaml` define as colunas nominais, ordinais, numéricas e o alvo `Q005`. As colunas de identificação e localização listadas em `drop_columns` são excluídas da saída.
+- Saída: em cada execução é criado um diretório `datasets/enem_2025 - v-YYYY-MM-DD_HH-MM-SS/` com:
+  - `baseline.csv` — dataset selecionado, sem ruído;
+  - `dp_eps_{epsilon}.csv` — uma versão por cada ε configurado (atualmente `0.1`, `0.5`, `1.0` e `2.0`);
+  - `metadata.json` — metadados por ε, com dataset, mecanismo, seed, quantidade de linhas e colunas, epsilons e limites/sensitivities dos atributos privatizados.
 
- ## Detalhes de Privacidade
+O dataset de saída atual possui 33 colunas: cinco nominais (`TP_SEXO`, `TP_COR_RACA`, `TP_NACIONALIDADE`, `SG_UF_PROVA`, `Q023`), 27 ordinais e o alvo `Q005`.
 
- - Mecanismo: Laplace (implementado com `diffprivlib`).
- - Atributos sensíveis: definidos em `config/pipeline.yaml` com bounds (min/max) — atualmente `salario`, `nota_media`, `idade`, `tempo_na_empresa`.
- - Sensibilidade: no código atual cada atributo usa `sensitivity = max - min` quando aplicado por-valor; a escolha de sensibilidade e a estratégia (por-valor vs. por-consulta) estão documentadas no código e no `README` para análise crítica.
- - Reprodutibilidade: a seed do mecanismo é lida de `config/pipeline.yaml` (`privacy.mechanism.seed`) ou adotada um valor padrão (42). A seed é registrada em `metadata.json` e passada ao mecanismo para garantir que execuções com a mesma configuração gerem os mesmos arquivos privatizados.
+## Detalhes de Privacidade
 
- ## Execução
+- Mecanismo: Laplace, implementado diretamente com `numpy.random.RandomState.laplace`.
+- Atributos sensíveis: definidos em `privacy.sensitive_attributes` de `config/enem.yaml`. Atualmente: `TP_FAIXA_ETARIA`, `TP_ANO_CONCLUIU`, `Q001`–`Q004`, `Q007`–`Q013`, `Q018`, `Q021` e `Q022`.
+- Codificação: os atributos sensíveis que possuem mapeamento em `encoding` são convertidos para códigos numéricos antes da perturbação. Após o ruído, cada código é convertido de volta à categoria válida mais próxima. A versão privada mantém, portanto, o formato categórico dessas colunas.
+- Sensibilidade: para cada atributo, o pipeline calcula `max - min` sobre todos os chunks da fonte. O ruído usa escala `sensitivity / epsilon` e o resultado é limitado ao intervalo observado.
+- Reprodutibilidade: uma instância pseudoaleatória é inicializada com `privacy.seed` para cada ε. Com a mesma fonte, configuração, ordem de leitura e seed, as versões geradas são reproduzíveis. A seed e os limites calculados são registrados em `metadata.json`.
 
- 1. Instale dependências (recomendado em virtualenv):
+## Execução
 
- ```bash
- python -m pip install -r requirements.txt
- ```
+1. Instale as dependências em um ambiente virtual:
 
- 2. Configure variáveis de ambiente para acesso ao PostgreSQL (ou use uma cópia local dos dados para desenvolvimento). O `extract` usa `python-dotenv` para carregar variáveis se um arquivo `.env` estiver presente.
+```bash
+python -m pip install -r requiremnts.txt
+```
 
- 3. Ajuste `config/pipeline.yaml` conforme necessário (tabelas, bounds, epsilons, seed).
+2. Disponibilize o CSV dos participantes no caminho configurado em `config/enem.yaml` ou altere `source.file`, `separator` e `encoding` para sua fonte.
 
- 4. Execute o pipeline:
+3. Ajuste `config/enem.yaml` conforme necessário: nome do dataset, colunas de saída, mapeamentos de categorias, atributos sensíveis, epsilons, seed e, opcionalmente, `source.chunk_size`.
 
- ```bash
- python run_pipeline.py
- ```
+4. Execute o pipeline:
 
- Ao final, um diretório em `datasets/` conterá o `baseline.csv`, os `dp_eps_*.csv` e o `metadata.json` com os parâmetros e a seed utilizada.
+```bash
+python run_pipeline.py
+```
 
- ## Observações e Boas Práticas
+Ao final, o comando informa o diretório criado em `datasets/`. Ele conterá o `baseline.csv`, os `dp_eps_*.csv` e o `metadata.json` da execução.
 
- - Este repositório implementa mecanismos experimentais para pesquisa. A aplicação direta desses datasets em produção exige revisão de contabilidade de privacidade (composição de ε), justificativa formal de sensitivities e auditoria.
- - Para reproduzir resultados exatos, mantenha `config/pipeline.yaml` e as variáveis de ambiente inalteradas entre execuções (a seed garante reprodutibilidade do ruído).
- - O pipeline atual aplica ruído por registro a atributos sensíveis. Dependendo do objetivo (liberar estatísticas agregadas versus datasets por registro) recomenda-se reavaliar a estratégia de sensibilidades e a forma de liberação (agregados, sintetizadores, shift controlado, etc.).
+## Observações e Boas Práticas
 
- ## Estrutura do Repositório
+- O pipeline foi pensado para arquivos grandes: a leitura e a escrita são feitas em chunks, mas cada execução realiza duas leituras completas da fonte.
+- Mapeamentos presentes em `encoding` devem incluir todos os valores não nulos encontrados na respectiva coluna; valores desconhecidos interrompem a execução para evitar uma codificação silenciosamente incorreta.
+- O baseline preserva os valores selecionados após a leitura. A codificação é aplicada somente à visão que será privatizada, e as categorias sensíveis são restauradas antes da persistência.
+- Este repositório implementa mecanismos experimentais para pesquisa. A aplicação direta desses datasets em produção exige revisão de contabilidade de privacidade (incluindo composição de ε), justificativa formal das sensitivities e auditoria.
+- O pipeline atual aplica ruído por registro aos atributos sensíveis. Dependendo do objetivo da liberação, recomenda-se reavaliar a estratégia de sensitivities e o formato da divulgação, por exemplo estatísticas agregadas ou dados sintéticos.
 
- - `run_pipeline.py` — orquestrador de execução;
- - `config/pipeline.yaml` — configuração principal do pipeline;
- - `src/extract.py` — extração de dados do banco;
- - `src/transform.py` — transformação e limpeza;
- - `src/diferential_privacy.py` — aplicação do mecanismo Laplace e geração de datasets DP;
- - `src/versioning.py` — persistência/versionamento dos datasets;
- - `datasets/` — saída gerada por execução (versões historicamente armazenadas);
- - `requirements.txt` — dependências do projeto.
+## Estrutura do Repositório
 
- ## Licença
+- `run_pipeline.py` — orquestrador de execução;
+- `config/enem.yaml` — configuração do experimento ENEM;
+- `config/Data/PARTICIPANTES_2025.csv` — arquivo de entrada configurado;
+- `src/data_exraction.py` — leitura incremental da fonte CSV;
+- `src/transform_dataframe.py` — seleção e validação das colunas;
+- `src/encoding.py` — codificação e decodificação reversível de categorias sensíveis;
+- `src/diferential_privacy.py` — cálculo de limites e aplicação do mecanismo Laplace;
+- `src/versioning.py` — persistência e versionamento dos datasets;
+- `datasets/` — versões geradas por execução;
+- `requiremnts.txt` — dependências do projeto.
 
- Uso acadêmico e educacional.
+## Licença
 
+Uso acadêmico e educacional.
