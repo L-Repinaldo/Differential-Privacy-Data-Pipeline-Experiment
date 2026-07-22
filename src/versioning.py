@@ -1,51 +1,49 @@
-import os
 import json
+import os
 from pathlib import Path
+
+import pandas as pd
 
 
 class VersioningError(Exception):
     pass
 
 
-def save_version(
-    baseline_df,
-    dp_results,
-    metadata,
-    base_dir="datasets",
-    version_name="v-YYYY-MM-DD_HH-MM-SS"
-):
-    """
-    Salva datasets versionados no formato:
+class CsvDatasetWriter:
+    """Grava chunks consecutivos em um CSV com um único cabeçalho."""
 
-    datasets/
-      v-YYYY-MM-DD_HH-MM-SS/
-        baseline.csv
-        dp_eps_0.1.csv
-        dp_eps_1.0.csv
-        metadata.json
-    """
+    def __init__(self, path: Path):
+        self.path = path
+        self._written = False
 
-    version_path = Path(base_dir) / version_name
+    def write(self, df: pd.DataFrame) -> None:
+        df.to_csv(self.path, mode="a" if self._written else "w", header=not self._written, index=False)
+        self._written = True
 
-    # cria diretório se não existir
+
+def create_version(base_dir: str = "datasets", version_name: str = "v-YYYY-MM-DD_HH-MM-SS", dataset_name: str = "") -> Path:
+    version_path = Path(base_dir) / f"{dataset_name} - {version_name}"
     version_path.mkdir(parents=True, exist_ok=False)
+    return version_path
 
-    # baseline
-    baseline_path = version_path / "baseline.csv"
-    baseline_df.to_csv(baseline_path, index=False)
 
-    # dp datasets
-    for eps, df_dp in dp_results.items():
-        fname = f"dp_eps_{eps}.csv"
-        df_dp.to_csv(version_path / fname, index=False)
+def baseline_writer(version_path: Path) -> CsvDatasetWriter:
+    return CsvDatasetWriter(Path(version_path) / "baseline.csv")
 
-    # metadata
-    metadata_path = version_path / "metadata.json"
-    with open(metadata_path, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, indent=2, ensure_ascii=False)
 
+def dp_writer(version_path: Path, epsilon: float) -> CsvDatasetWriter:
+    return CsvDatasetWriter(Path(version_path) / f"dp_eps_{epsilon}.csv")
+
+
+def save_metadata(metadata: dict, version_path: Path) -> None:
+    with (Path(version_path) / "metadata.json").open("w", encoding="utf-8") as file:
+        json.dump(metadata, file, indent=2, ensure_ascii=False)
+
+
+def finish_version(version_path: Path) -> dict:
+    version_path = Path(version_path)
     return {
-        "version": version_name,
+        "version": version_path.name,
         "path": str(version_path),
-        "files": sorted(os.listdir(version_path))
+        "files": sorted(os.listdir(version_path)),
     }
