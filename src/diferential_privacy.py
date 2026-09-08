@@ -1,4 +1,3 @@
-"""Aplicação incremental do mecanismo de Laplace."""
 
 import numpy as np
 import pandas as pd
