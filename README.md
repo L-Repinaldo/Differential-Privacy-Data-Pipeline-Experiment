@@ -17,7 +17,7 @@ Principais componentes (módulos):
 - `src/transform_dataframe.py` — seleciona e valida as colunas de saída. A saída reúne as colunas nominais, ordinais, numéricas e a coluna-alvo; as demais, incluindo as listadas em `drop_columns`, não são carregadas para o resultado.
 - `src/encoding.py` — codifica temporariamente os atributos categóricos sensíveis para valores numéricos, valida os mapeamentos e decodifica os valores privatizados para a categoria mais próxima antes da gravação.
 - `src/diferential_privacy.py` — valida a configuração, calcula limites globais dos atributos sensíveis e aplica ruído Laplace com NumPy, limitado aos valores mínimo e máximo observados.
-- `src/versioning.py` — cria `datasets/{nome_do_dataset} - v-YYYY-MM-DD_HH-MM-SS/` e grava os CSVs incrementalmente, com um único cabeçalho por arquivo.
+- `src/versioning.py` — cria `datasets/{nome_do_dataset} - v-YYYY-MM-DD_HH-MM-SS/` e grava os parquets incrementalmente, com um único cabeçalho por arquivo.
 - `config/enem.yaml` — arquivo de configuração principal: fonte ENEM, seleção de colunas, mapeamentos de codificação e parâmetros de privacidade.
 
 Cada módulo tem responsabilidade bem definida e o fluxo é implementado por `run_pipeline.py`.
@@ -56,8 +56,8 @@ O uso de duas passagens evita materializar o arquivo inteiro em memória e garan
 - Entrada: CSV configurado em `source.file`, atualmente `config/Data/PARTICIPANTES_2025.csv`, separado por `;` e lido com codificação `latin-1`.
 - Transformação: o arquivo `config/enem.yaml` define as colunas nominais, ordinais, numéricas e o alvo `Q005`. As colunas de identificação e localização listadas em `drop_columns` são excluídas da saída.
 - Saída: em cada execução é criado um diretório `datasets/enem_2025 - v-YYYY-MM-DD_HH-MM-SS/` com:
-  - `baseline.csv` — dataset selecionado, sem ruído;
-  - `dp_eps_{epsilon}.csv` — uma versão por cada ε configurado (atualmente `0.1`, `0.5`, `1.0` e `2.0`);
+  - `baseline.parquet` — dataset selecionado, sem ruído;
+  - `dp_eps_{epsilon}.parquet` — uma versão por cada ε configurado (atualmente `0.05`, `0.1`, `0.5`, `1.0` , `2.0` e `3.0`);
   - `metadata.json` — metadados por ε, com dataset, mecanismo, seed, quantidade de linhas e colunas, epsilons e limites/sensitivities dos atributos privatizados.
 
 O dataset de saída atual possui 33 colunas: cinco nominais (`TP_SEXO`, `TP_COR_RACA`, `TP_NACIONALIDADE`, `SG_UF_PROVA`, `Q023`), 27 ordinais e o alvo `Q005`.
@@ -88,7 +88,7 @@ python -m pip install -r requiremnts.txt
 python run_pipeline.py
 ```
 
-Ao final, o comando informa o diretório criado em `datasets/`. Ele conterá o `baseline.csv`, os `dp_eps_*.csv` e o `metadata.json` da execução.
+Ao final, o comando informa o diretório criado em `datasets/`. Ele conterá o `baseline.parquet`, os `dp_eps_*.parquet` e o `metadata.json` da execução.
 
 ## Observações e Boas Práticas
 
