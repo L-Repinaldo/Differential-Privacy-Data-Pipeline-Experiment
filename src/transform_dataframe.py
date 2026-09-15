@@ -7,41 +7,64 @@ class TransformError(Exception):
     pass
 
 
-def prepare_dataframe(data: pd.DataFrame, transform_cfg: dict) -> pd.DataFrame:
-    """Retorna somente as colunas de saída para um chunk de entrada.
+def prepare_dataframe(
+    data: pd.DataFrame,
+    transform_cfg: dict,
+) -> pd.DataFrame:
+    """Seleciona as colunas que permanecem no pipeline."""
 
-    A seleção substitui a remoção prévia das demais colunas: o resultado é o
-    mesmo, mas evita criar uma cópia intermediária do chunk inteiro.
-    """
-    columns = output_columns(transform_cfg)
-    _validate_columns(data.columns, columns, "Colunas de saída")
-    _validate_columns(data.columns, transform_cfg["drop_columns"], "Colunas para descarte")
+    drop_columns = transform_cfg["drop_columns"]
+
+    _validate_columns(
+        data.columns,
+        drop_columns,
+        "Colunas para descarte",
+    )
+
+    columns = [
+        column
+        for column in data.columns
+        if column not in drop_columns
+    ]
+
     return data.loc[:, columns]
 
 
-def output_columns(transform_cfg: dict) -> list[str]:
-    required = ("drop_columns", "nominal_columns", "ordinal_columns", "numerical_columns", "target")
-    missing = [key for key in required if key not in transform_cfg]
-    if missing:
-        raise TransformError(f"Configuração de transformação sem {missing}")
+def output_columns(
+    available_columns: pd.Index,
+    transform_cfg: dict,
+) -> list[str]:
+    """Retorna as colunas que devem permanecer no dataset."""
 
-    target = transform_cfg["target"]
-    if not isinstance(target, dict) or "column" not in target:
-        raise TransformError("Configuração de transformação sem 'target.column'")
+    if "drop_columns" not in transform_cfg:
+        raise TransformError(
+            "Configuração de transformação sem 'drop_columns'"
+        )
 
-    columns = (
-        list(transform_cfg["nominal_columns"])
-        + list(transform_cfg["ordinal_columns"])
-        + list(transform_cfg["numerical_columns"])
-        + [target["column"]]
-    )
-    duplicated = sorted({column for column in columns if columns.count(column) > 1})
-    if duplicated:
-        raise TransformError(f"Colunas de saída duplicadas: {duplicated}")
+    drop_columns = list(transform_cfg["drop_columns"])
+
+    columns = [
+        column
+        for column in available_columns
+        if column not in drop_columns
+    ]
+
+    if not columns:
+        raise TransformError(
+            "Nenhuma coluna disponível após os descartes."
+        )
+
     return columns
 
 
-def _validate_columns(available: pd.Index, expected: list[str], label: str) -> None:
+def _validate_columns(
+    available: pd.Index,
+    expected: list[str],
+    label: str,
+) -> None:
     missing = sorted(set(expected) - set(available))
+
     if missing:
-        raise TransformError(f"{label} não encontradas: {missing}")
+        raise TransformError(
+            f"{label} não encontradas: {missing}"
+        )

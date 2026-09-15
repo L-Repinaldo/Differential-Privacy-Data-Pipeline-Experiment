@@ -38,7 +38,10 @@ def sensitive_mappings(encoding_cfg: dict, sensitive_attributes: list[str]) -> d
 
 
 def decode_dataframe(df: pd.DataFrame, reverse_mapping: dict) -> pd.DataFrame:
-    """Decodifica o DataFrame *in place* imediatamente antes da persistência."""
+    """
+    Decodifica categorias após perturbação.
+    Não deve ser aplicada aos datasets DP persistidos.
+    """
     for column, mapping in reverse_mapping.items():
         codes = np.asarray(sorted(mapping))
         values = np.asarray([mapping[code] for code in codes], dtype=object)

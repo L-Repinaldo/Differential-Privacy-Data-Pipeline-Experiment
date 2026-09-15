@@ -8,20 +8,40 @@ class DPError(Exception):
     pass
 
 
-def validate_privacy_config(privacy_cfg: dict, columns: list[str]) -> None:
-    required = ("mechanism", "epsilons", "seed", "sensitive_attributes")
+def validate_privacy_config(
+    privacy_cfg: dict,
+    columns: list[str],
+) -> None:
+    required = (
+        "mechanism",
+        "epsilons",
+        "seed",
+        "sensitive_attributes",
+    )
+
     missing = [key for key in required if key not in privacy_cfg]
+
     if missing:
         raise DPError(f"Configuração de privacidade sem {missing}")
+
     if privacy_cfg["mechanism"] != "laplace":
         raise DPError("Somente mecanismo Laplace é suportado.")
 
-    if not isinstance(privacy_cfg["epsilons"], list) or not privacy_cfg["epsilons"]:
+    if (
+        not isinstance(privacy_cfg["epsilons"], list)
+        or not privacy_cfg["epsilons"]
+    ):
         raise DPError("'epsilons' deve ser uma lista não vazia.")
 
-    unknown = sorted(set(privacy_cfg["sensitive_attributes"]) - set(columns))
+    unknown = sorted(
+        set(privacy_cfg["sensitive_attributes"]) - set(columns)
+    )
+
     if unknown:
-        raise DPError(f"Atributos sensíveis ausentes no dataset: {unknown}")
+        raise DPError(
+            f"Atributos sensíveis ausentes no dataset: {unknown}"
+        )
+
     if any(epsilon <= 0 for epsilon in privacy_cfg["epsilons"]):
         raise DPError("Todos os valores de epsilon devem ser positivos.")
 

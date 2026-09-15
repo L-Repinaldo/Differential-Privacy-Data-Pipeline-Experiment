@@ -1,4 +1,3 @@
-"""Extração incremental de datasets tabulares."""
 
 from collections.abc import Iterator
 
