@@ -1,115 +1,260 @@
-# Differential-Privacy-Data-Pipeline
+# Differential Privacy Data Pipeline Experiment
 
-Camada de preparação, aplicação de Privacidade Diferencial e versionamento para o experimento com microdados do [ENEM 2025](https://www.gov.br/inep/pt-br/acesso-a-informacao/dados-abertos/microdados/enem)
+## Visão Geral
+
+Este repositório implementa o pipeline experimental de preparação, aplicação de Privacidade Diferencial e versionamento de microdados tabulares do [ENEM 2025](https://www.gov.br/inep/pt-br/acesso-a-informacao/dados-abertos/microdados). Ele prepara a fonte de entrada em chunks, remove colunas configuradas, calcula limites globais dos atributos sensíveis e gera um dataset baseline junto de versões perturbadas para diferentes valores de ε (`epsilon`).
+
+O projeto é a etapa de geração de dados do experimento de privacidade. Ele não treina modelos nem executa avaliações de utilidade ou Membership Inference Attack; essas atividades pertencem ao pipeline experimental de Machine Learning que consome os datasets produzidos aqui.
+
+```text
+menor ε → maior ruído esperado e maior garantia nominal de privacidade
+maior ε → menor ruído esperado e, potencialmente, maior utilidade
+```
+
+> **Nota:** este repositório tem finalidade acadêmica e experimental. Os mecanismos, a contabilidade de privacidade e o formato de divulgação devem ser revisados antes de qualquer uso em produção.
+
+---
 
 ## Objetivo do Projeto
 
-Este repositório implementa a etapa de Privacidade Diferencial do experimento. Sua responsabilidade é receber os microdados tabulares do ENEM, selecionar e preparar as variáveis configuradas, aplicar mecanismos de privacidade configuráveis e produzir versões versionadas dos datasets para consumo pelo pipeline experimental de Machine Learning e testes de Membership Inference Attack.
+O pipeline recebe uma fonte CSV configurada, prepara as colunas que permanecerão no experimento, aplica ruído Laplace aos atributos sensíveis e grava cada execução em uma versão independente.
 
-Em particular, o projeto permite comparar o impacto de diferentes valores de ε sobre a utilidade dos dados, preservando o dataset base e os parâmetros empregados em cada execução.
+O desenho preserva:
 
-## Arquitetura Geral
+- o dataset baseline, sem ruído;
+- uma versão privada para cada ε configurado;
+- os limites globais e as sensitivities usados pelo mecanismo;
+- a seed e os demais metadados necessários para documentar a execução.
 
-Principais componentes (módulos):
+A leitura e a escrita são incrementais, de modo que o arquivo inteiro não precisa ser materializado em memória.
 
-- `run_pipeline.py` — orquestra a execução: carrega `config/enem.yaml`, faz o perfil dos dados, cria a versão e grava o baseline e as versões privadas.
-- `src/data_exraction.py` — lê o CSV de origem incrementalmente com Pandas. O tamanho dos chunks é configurável e, se omitido, é `100_000` linhas.
-- `src/transform_dataframe.py` — seleciona e valida as colunas de saída. A saída reúne as colunas nominais, ordinais, numéricas e a coluna-alvo; as demais, incluindo as listadas em `drop_columns`, não são carregadas para o resultado.
-- `src/encoding.py` — codifica temporariamente os atributos categóricos sensíveis para valores numéricos, valida os mapeamentos e decodifica os valores privatizados para a categoria mais próxima antes da gravação.
-- `src/diferential_privacy.py` — valida a configuração, calcula limites globais dos atributos sensíveis e aplica ruído Laplace com NumPy, limitado aos valores mínimo e máximo observados.
-- `src/versioning.py` — cria `datasets/{nome_do_dataset} - v-YYYY-MM-DD_HH-MM-SS/` e grava os parquets incrementalmente, com um único cabeçalho por arquivo.
-- `config/enem.yaml` — arquivo de configuração principal: fonte ENEM, seleção de colunas, mapeamentos de codificação e parâmetros de privacidade.
+---
 
-Cada módulo tem responsabilidade bem definida e o fluxo é implementado por `run_pipeline.py`.
+## Arquitetura Atual
+
+A arquitetura é composta por um orquestrador, módulos de extração e transformação, uma camada de codificação para atributos sensíveis, o mecanismo de privacidade e a persistência versionada:
+
+```text
+Fonte CSV
+  → Extração incremental
+  → Seleção e validação das colunas
+  → Codificação dos atributos sensíveis
+  → Perfil global: limites mínimo/máximo
+  → Geração do baseline e das versões DP
+  → Persistência em Parquet e metadata.json
+```
+
+Responsabilidades principais:
+
+- **Orquestração:** `run_pipeline.py` carrega a configuração, executa o profiling em duas passagens, cria a versão e coordena a escrita.
+- **Extração:** `src/data_exraction.py` lê CSVs com Pandas em chunks, usando `100_000` linhas por padrão.
+- **Transformação:** `src/transform_dataframe.py` valida as colunas configuradas para descarte e seleciona todas as demais.
+- **Codificação:** `src/encoding.py` valida e converte mapeamentos categóricos dos atributos sensíveis para códigos numéricos.
+- **Privacidade:** `src/diferential_privacy.py` valida a configuração, calcula limites globais e aplica ruído Laplace limitado ao intervalo observado.
+- **Versionamento:** `src/versioning.py` grava os chunks em arquivos Parquet com schema consistente e salva os metadados da execução.
+
+---
 
 ## Papel na Arquitetura do Experimento
 
-- Microdados ENEM 2025: fonte tabular de participantes, configurada como `config/Data/PARTICIPANTES_2025.csv`.
-- DP Data Pipeline (este repositório): lê os dados em chunks, prepara as variáveis, aplica Privacidade Diferencial e versiona os resultados.
-- Pipeline Experimental de Machine Learning: consome o baseline e as versões privatizadas para treinar modelos e executar avaliações, incluindo ataques de Membership Inference.
+O experimento completo é formado por dois sistemas independentes:
 
-Este repositório corresponde estritamente à etapa de preparação e privatização; não realiza treino ou avaliação de modelos.
+1. **Differential Privacy Data Pipeline Experiment** — este repositório.
+   - Lê os microdados do ENEM.
+   - Seleciona as colunas do dataset experimental.
+   - Codifica os atributos sensíveis quando há mapeamento configurado.
+   - Aplica o mecanismo Laplace para os ε definidos.
+   - Versiona o baseline e as saídas privadas.
 
-## Fluxo Completo dos Dados
+2. **Pipeline Experimental de Machine Learning** — sistema consumidor.
+   - Carrega o baseline e os datasets `dp_eps_*.parquet`.
+   - Treina modelos de classificação para medir utilidade.
+   - Executa avaliações de risco, incluindo Membership Inference Attack.
+   - Compara o trade-off entre utilidade e privacidade.
+
+Este repositório corresponde estritamente à preparação, privatização e persistência dos datasets.
+
+---
+
+## Fluxo Experimental
 
 ```text
 config/Data/PARTICIPANTES_2025.csv
    ↓
-src/data_exraction.py (leitura incremental em chunks)
+src/data_exraction.py
+(leitura incremental em chunks)
    ↓
-src/transform_dataframe.py (seleção e validação das colunas)
+src/transform_dataframe.py
+(remoção das colunas configuradas)
    ↓
-1ª passagem: src/encoding.py + src/diferential_privacy.py
-            (codificação e cálculo dos limites globais)
+1ª passagem
+src/encoding.py + src/diferential_privacy.py
+(codificação e cálculo dos limites globais)
    ↓
-2ª passagem: baseline.csv + codificação → ruído Laplace → decodificação
+2ª passagem
+baseline.parquet + ruído Laplace nas colunas sensíveis
    ↓
-src/versioning.py (gravação incremental e metadata.json)
+src/versioning.py
+(Parquet incremental + metadata.json)
    ↓
 datasets/enem_2025 - v-YYYY-MM-DD_HH-MM-SS/
 ```
 
-O uso de duas passagens evita materializar o arquivo inteiro em memória e garante que os limites usados pelo mecanismo sejam globais, e não apenas do chunk em processamento.
+A primeira passagem calcula os limites sobre todos os chunks. A segunda escreve o baseline e aplica o mecanismo privado usando esses limites globais, evitando que a escala do ruído dependa apenas do chunk corrente.
+
+---
+
+## Estrutura do Repositório
+
+```text
+.
+├── config/
+│   ├── enem.yaml
+│   └── Data/
+│       └── PARTICIPANTES_2025.csv
+├── datasets/
+├── src/
+│   ├── data_exraction.py
+│   ├── diferential_privacy.py
+│   ├── encoding.py
+│   ├── transform_dataframe.py
+│   └── versioning.py
+├── get_uniques.py
+├── requiremnts.txt
+├── run_pipeline.py
+└── README.md
+```
+
+`datasets/` recebe as versões geradas durante a execução e pode não conter saídas em um clone limpo do repositório.
+
+---
+
+## Configuração
+
+A configuração principal está em [`config/enem.yaml`](config/enem.yaml):
+
+```yaml
+dataset:
+  name: enem_2025
+
+source:
+  file: config/Data/PARTICIPANTES_2025.csv
+  separator: ";"
+  encoding: latin-1
+
+privacy:
+  mechanism: laplace
+  seed: 42
+```
+
+A configuração atual também define as colunas descartadas:
+
+- `NU_INSCRICAO`
+- `NU_ANO`
+- `CO_MUNICIPIO_PROVA`
+- `NO_MUNICIPIO_PROVA`
+- `CO_UF_PROVA`
+
+Os atributos sensíveis configurados atualmente são `TP_FAIXA_ETARIA` e `Q001`–`Q004`, `Q007`–`Q022`, com os mapeamentos categóricos correspondentes definidos na seção `privacy.encoding`.
+
+Os valores de ε configurados atualmente são:
+
+```text
+0.05, 0.1, 0.5, 1.0, 2.0, 3.0
+```
+
+Opcionalmente, `source.chunk_size` pode ser usado para alterar o tamanho dos chunks. Quando omitido, o valor padrão é `100_000`.
+
+---
 
 ## Formato de Entrada e Saída
 
-- Entrada: CSV configurado em `source.file`, atualmente `config/Data/PARTICIPANTES_2025.csv`, separado por `;` e lido com codificação `latin-1`.
-- Transformação: o arquivo `config/enem.yaml` define as colunas nominais, ordinais, numéricas e o alvo `Q005`. As colunas de identificação e localização listadas em `drop_columns` são excluídas da saída.
-- Saída: em cada execução é criado um diretório `datasets/enem_2025 - v-YYYY-MM-DD_HH-MM-SS/` com:
-  - `baseline.parquet` — dataset selecionado, sem ruído;
-  - `dp_eps_{epsilon}.parquet` — uma versão por cada ε configurado (atualmente `0.05`, `0.1`, `0.5`, `1.0` , `2.0` e `3.0`);
-  - `metadata.json` — metadados por ε, com dataset, mecanismo, seed, quantidade de linhas e colunas, epsilons e limites/sensitivities dos atributos privatizados.
+### Entrada
 
-O dataset de saída atual possui 33 colunas: cinco nominais (`TP_SEXO`, `TP_COR_RACA`, `TP_NACIONALIDADE`, `SG_UF_PROVA`, `Q023`), 27 ordinais e o alvo `Q005`.
+A fonte padrão é o arquivo `config/Data/PARTICIPANTES_2025.csv`, lido como CSV separado por `;` e com codificação `latin-1`. O caminho, separador e encoding podem ser alterados em `config/enem.yaml`.
 
-## Detalhes de Privacidade
+O pipeline remove as colunas listadas em `drop_columns` e mantém as demais colunas presentes na fonte. A configuração atual não define uma lista explícita de colunas de saída: a seleção é feita por exclusão.
 
-- Mecanismo: Laplace, implementado diretamente com `numpy.random.RandomState.laplace`.
-- Atributos sensíveis: definidos em `privacy.sensitive_attributes` de `config/enem.yaml`. Atualmente: `TP_FAIXA_ETARIA`, `TP_ANO_CONCLUIU`, `Q001`–`Q004`, `Q007`–`Q013`, `Q018`, `Q021` e `Q022`.
-- Codificação: os atributos sensíveis que possuem mapeamento em `encoding` são convertidos para códigos numéricos antes da perturbação. Após o ruído, cada código é convertido de volta à categoria válida mais próxima. A versão privada mantém, portanto, o formato categórico dessas colunas.
-- Sensibilidade: para cada atributo, o pipeline calcula `max - min` sobre todos os chunks da fonte. O ruído usa escala `sensitivity / epsilon` e o resultado é limitado ao intervalo observado.
-- Reprodutibilidade: uma instância pseudoaleatória é inicializada com `privacy.seed` para cada ε. Com a mesma fonte, configuração, ordem de leitura e seed, as versões geradas são reproduzíveis. A seed e os limites calculados são registrados em `metadata.json`.
+### Saída
+
+Cada execução cria um diretório no formato:
+
+```text
+datasets/enem_2025 - v-YYYY-MM-DD_HH-MM-SS/
+├── baseline.parquet
+├── dp_eps_0.05.parquet
+├── dp_eps_0.1.parquet
+├── dp_eps_0.5.parquet
+├── dp_eps_1.0.parquet
+├── dp_eps_2.0.parquet
+├── dp_eps_3.0.parquet
+└── metadata.json
+```
+
+- `baseline.parquet` contém as colunas selecionadas sem ruído.
+- `dp_eps_{epsilon}.parquet` contém uma versão para cada ε configurado.
+- `metadata.json` registra dataset, mecanismo, seed, quantidade de linhas, quantidade de colunas, εs, limites e sensitivities.
+
+Os arquivos Parquet são escritos incrementalmente. O escritor mantém um único arquivo por saída e rejeita chunks cujo schema seja incompatível com o schema inicial.
+
+---
+
+## Mecanismo de Privacidade
+
+O mecanismo atual é Laplace, implementado diretamente com `numpy.random.RandomState.laplace`.
+
+Para cada atributo sensível:
+
+1. O mapeamento categórico é validado e, quando configurado, os valores são convertidos para códigos numéricos.
+2. Na primeira passagem, são calculados o mínimo e o máximo globais.
+3. A sensitivity é calculada como `max - min`.
+4. Na segunda passagem, o ruído é gerado com escala `sensitivity / epsilon`.
+5. O resultado é limitado ao intervalo `[min, max]` observado.
+
+A implementação aplica ruído diretamente aos registros e mantém os valores perturbados numéricos nos arquivos DP. Embora `src/encoding.py` contenha uma função de decodificação para uso auxiliar, o fluxo atual do `run_pipeline.py` não decodifica os atributos antes de persistir os datasets privados.
+
+A seed configurada é usada para inicializar um gerador pseudoaleatório independente para cada ε. A reprodução depende da mesma fonte, configuração, ordem de leitura e seed.
+
+---
 
 ## Execução
 
-1. Instale as dependências em um ambiente virtual:
+1. Crie e ative um ambiente virtual, se desejado.
+
+2. Instale as dependências:
 
 ```bash
 python -m pip install -r requiremnts.txt
 ```
 
-2. Disponibilize o CSV dos participantes no caminho configurado em `config/enem.yaml` ou altere `source.file`, `separator` e `encoding` para sua fonte.
+3. Disponibilize a fonte no caminho configurado ou ajuste `source.file`, `source.separator` e `source.encoding` em `config/enem.yaml`.
 
-3. Ajuste `config/enem.yaml` conforme necessário: nome do dataset, colunas de saída, mapeamentos de categorias, atributos sensíveis, epsilons, seed e, opcionalmente, `source.chunk_size`.
+4. Revise o nome do dataset, as colunas descartadas, os atributos sensíveis, os mapeamentos, os εs e a seed.
 
-4. Execute o pipeline:
+5. Execute:
 
 ```bash
 python run_pipeline.py
 ```
 
-Ao final, o comando informa o diretório criado em `datasets/`. Ele conterá o `baseline.parquet`, os `dp_eps_*.parquet` e o `metadata.json` da execução.
+Ao final, o comando imprime um resumo com o diretório da versão e os arquivos gerados.
 
-## Observações e Boas Práticas
+---
 
-- O pipeline foi pensado para arquivos grandes: a leitura e a escrita são feitas em chunks, mas cada execução realiza duas leituras completas da fonte.
-- Mapeamentos presentes em `encoding` devem incluir todos os valores não nulos encontrados na respectiva coluna; valores desconhecidos interrompem a execução para evitar uma codificação silenciosamente incorreta.
-- O baseline preserva os valores selecionados após a leitura. A codificação é aplicada somente à visão que será privatizada, e as categorias sensíveis são restauradas antes da persistência.
-- Este repositório implementa mecanismos experimentais para pesquisa. A aplicação direta desses datasets em produção exige revisão de contabilidade de privacidade (incluindo composição de ε), justificativa formal das sensitivities e auditoria.
-- O pipeline atual aplica ruído por registro aos atributos sensíveis. Dependendo do objetivo da liberação, recomenda-se reavaliar a estratégia de sensitivities e o formato da divulgação, por exemplo estatísticas agregadas ou dados sintéticos.
+## Validações e Boas Práticas
 
-## Estrutura do Repositório
+- Todos os valores de ε devem ser positivos.
+- O mecanismo suportado atualmente é apenas `laplace`.
+- Todos os atributos sensíveis devem existir no dataset preparado.
+- Os mapeamentos configurados devem conter todos os valores não nulos encontrados nas respectivas colunas; valores desconhecidos interrompem a execução.
+- Os códigos dos mapeamentos devem ser numéricos e reversíveis.
+- Os atributos sensíveis devem ser numéricos após a codificação e não podem conter somente valores ausentes.
+- A fonte é lida duas vezes: uma para profiling e outra para gravação e aplicação do ruído.
+- O baseline é escrito antes da aplicação do ruído e não é alterado pela codificação usada para a visão privada.
+- A aplicação do mecanismo a múltiplos atributos e múltiplas versões exige análise de composição de privacidade adequada ao objetivo da divulgação.
+- Os datasets gerados podem conter dados sensíveis; controle o armazenamento e o compartilhamento da pasta `datasets/`.
 
-- `run_pipeline.py` — orquestrador de execução;
-- `config/enem.yaml` — configuração do experimento ENEM;
-- `config/Data/PARTICIPANTES_2025.csv` — arquivo de entrada configurado;
-- `src/data_exraction.py` — leitura incremental da fonte CSV;
-- `src/transform_dataframe.py` — seleção e validação das colunas;
-- `src/encoding.py` — codificação e decodificação reversível de categorias sensíveis;
-- `src/diferential_privacy.py` — cálculo de limites e aplicação do mecanismo Laplace;
-- `src/versioning.py` — persistência e versionamento dos datasets;
-- `datasets/` — versões geradas por execução;
-- `requiremnts.txt` — dependências do projeto.
+---
 
 ## Licença
 
