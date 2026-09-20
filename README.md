@@ -66,7 +66,7 @@ O experimento completo é formado por dois sistemas independentes:
    - Aplica o mecanismo Laplace para os ε definidos.
    - Versiona o baseline e as saídas privadas.
 
-2. **Pipeline Experimental de Machine Learning** — sistema consumidor.
+2. [**Pipeline Experimental de Machine Learning**](https://github.com/L-Repinaldo/ML-MIA-Privacy-Evaluation/tree/main) — sistema consumidor.
    - Carrega o baseline e os datasets `dp_eps_*.parquet`.
    - Treina modelos de classificação para medir utilidade.
    - Executa avaliações de risco, incluindo Membership Inference Attack.
